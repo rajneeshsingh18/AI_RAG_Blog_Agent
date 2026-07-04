@@ -6,7 +6,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from src.llm_provider import get_chat_model
 
 from pydantic import BaseModel, Field
 
@@ -40,7 +40,11 @@ def grade_documents(state) -> Literal["generate", "rewrite"]:
         binary_score: str = Field(description="Relevance score 'yes' or 'no'")
 
     # LLM
-    model = ChatGoogleGenerativeAI(api_key=st.session_state.gemini_api_key, temperature=0, model="gemini-2.5-flash", streaming=True)
+    provider = st.session_state.get("provider", "ollama")
+    model = get_chat_model(
+        provider=provider,
+        api_key=st.session_state.gemini_api_key
+    )
 
     # LLM with tool and validation
     llm_with_tool = model.with_structured_output(grade)
@@ -92,7 +96,11 @@ def agent(state, tools):
     """
     print("---CALL AGENT---")
     messages = state["messages"]
-    model = ChatGoogleGenerativeAI(api_key=st.session_state.gemini_api_key, temperature=0, streaming=True, model="gemini-2.5-flash")
+    provider = st.session_state.get("provider", "ollama")
+    model = get_chat_model(
+        provider=provider,
+        api_key=st.session_state.gemini_api_key
+    )
     model = model.bind_tools(tools)
     response = model.invoke(messages)
     
@@ -128,7 +136,11 @@ def rewrite(state):
     ]
 
     # Grader
-    model = ChatGoogleGenerativeAI(api_key=st.session_state.gemini_api_key, temperature=0, model="gemini-2.5-flash", streaming=True)
+    provider = st.session_state.get("provider", "ollama")
+    model = get_chat_model(
+        provider=provider,
+        api_key=st.session_state.gemini_api_key
+    )
     response = model.invoke(msg)
     return {"messages": [response]}
 
@@ -151,11 +163,20 @@ def generate(state):
     docs = last_message.content
 
     # Initialize a Chat Prompt Template
-    from langchain_classic import hub
-    prompt_template = hub.pull("rlm/rag-prompt")
+    prompt_template = PromptTemplate(
+        template="""You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
+Question: {question} 
+Context: {context} 
+Answer:""",
+        input_variables=["question", "context"]
+    )
 
     # Initialize a Generator (i.e. Chat Model)
-    chat_model = ChatGoogleGenerativeAI(api_key=st.session_state.gemini_api_key, model="gemini-2.5-flash", temperature=0, streaming=True)
+    provider = st.session_state.get("provider", "ollama")
+    chat_model = get_chat_model(
+        provider=provider,
+        api_key=st.session_state.gemini_api_key
+    )
 
     # Initialize a Output Parser
     output_parser = StrOutputParser()

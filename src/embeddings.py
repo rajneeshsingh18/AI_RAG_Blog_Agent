@@ -1,8 +1,7 @@
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from src.llm_provider import get_embedding_model as factory_get_embedding_model
+import streamlit as st
 
-def get_embedding_model(api_key: str):
-    """Initializes Google Generative AI embedding model using the gemini-embedding-001 model."""
-    return GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=api_key
-    )
+def get_embedding_model(api_key: str = None):
+    """Initializes the embedding model based on the selected provider in session state."""
+    provider = st.session_state.get("provider", "ollama")
+    return factory_get_embedding_model(provider, api_key=api_key)

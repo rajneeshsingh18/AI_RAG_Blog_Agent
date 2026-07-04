@@ -11,3 +11,4 @@ python-dotenv
 streamlit
 langchain-classic
 pypdf
+langchain-ollama

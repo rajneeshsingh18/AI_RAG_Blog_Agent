@@ -11,6 +11,7 @@ from src.retriever import create_rag_retriever_tool
 
 from langchain_core.messages import HumanMessage
 from src.graph import get_graph, generate_message
+from src.llm_provider import get_vector_size
 
 import os
 from dotenv import load_dotenv
@@ -72,6 +73,8 @@ st.header("⚡ :blue[Agentic RAG] :grey[AI Blog & Document Search]")
 st.caption("Load URLs or upload files to start a conversational search using LangGraph agents.")
 
 # Initialize session state variables if they don't exist
+if 'provider' not in st.session_state:
+    st.session_state.provider = os.getenv("LLM_PROVIDER", "ollama")
 if 'qdrant_host' not in st.session_state:
     st.session_state.qdrant_host = os.getenv("QDRANT_HOST", ":memory:")
 if 'qdrant_api_key' not in st.session_state:
@@ -86,19 +89,32 @@ def set_sidebar():
     with st.sidebar:
         st.subheader("⚙️ API Configuration")
         
+        provider = st.selectbox(
+            "Select LLM Provider:", 
+            ["ollama", "gemini"], 
+            index=0 if st.session_state.provider == "ollama" else 1
+        )
+        
         qdrant_host = st.text_input("Qdrant Host URL:", type="password", value=st.session_state.qdrant_host)
         qdrant_api_key = st.text_input("Qdrant API Key:", type="password", value=st.session_state.qdrant_api_key)
-        gemini_api_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key)
+        
+        gemini_api_key = st.session_state.gemini_api_key
+        if provider == "gemini":
+            gemini_api_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key)
 
         if st.button("Save Configuration", use_container_width=True):
-            if qdrant_host and qdrant_api_key and gemini_api_key:
+            if provider == "gemini" and not gemini_api_key:
+                st.warning("Please fill the Gemini API Key field.")
+            elif qdrant_host and qdrant_api_key:
+                st.session_state.provider = provider
                 st.session_state.qdrant_host = qdrant_host
                 st.session_state.qdrant_api_key = qdrant_api_key
-                st.session_state.gemini_api_key = gemini_api_key
+                if provider == "gemini":
+                    st.session_state.gemini_api_key = gemini_api_key
                 st.success("API keys saved successfully!")
                 st.rerun()
             else:
-                st.warning("Please fill all configuration fields.")
+                st.warning("Please fill Qdrant configuration fields.")
         
         st.markdown("---")
         if st.button("🗑️ Clear Chat History", use_container_width=True):
@@ -108,10 +124,15 @@ def set_sidebar():
 
 def initialize_components():
     """Initialize components that require API keys"""
-    if not all([st.session_state.qdrant_host, 
-               st.session_state.qdrant_api_key, 
-               st.session_state.gemini_api_key]):
-        return None, None, None
+    provider = st.session_state.provider
+    if provider == "ollama":
+        if not all([st.session_state.qdrant_host, st.session_state.qdrant_api_key]):
+            return None, None, None
+    else:
+        if not all([st.session_state.qdrant_host, 
+                   st.session_state.qdrant_api_key, 
+                   st.session_state.gemini_api_key]):
+            return None, None, None
 
     try:
         embedding_model = get_embedding_model(st.session_state.gemini_api_key)
@@ -122,8 +143,9 @@ def initialize_components():
             api_key=st.session_state.qdrant_api_key
         )
 
-        # Ensure collection exists
-        ensure_collection_exists(client, collection_name="qdrant_db")
+        # Ensure collection exists with correct vector size
+        vector_size = get_vector_size(provider)
+        ensure_collection_exists(client, collection_name="qdrant_db", vector_size=vector_size)
 
         # Initialize vector store
         db = get_vector_store(client, collection_name="qdrant_db", embedding_model=embedding_model)
@@ -131,18 +153,21 @@ def initialize_components():
         return embedding_model, client, db
         
     except Exception as e:
-        # Try listing models to diagnose
-        try:
-            from google import genai
-            client = genai.Client(api_key=st.session_state.gemini_api_key)
-            available = [m.name for m in client.models.list() if 'embedContent' in getattr(m, 'supported_actions', [])]
+        if provider == "gemini":
+            # Try listing models to diagnose
+            try:
+                from google import genai
+                client = genai.Client(api_key=st.session_state.gemini_api_key)
+                available = [m.name for m in client.models.list() if 'embedContent' in getattr(m, 'supported_actions', [])]
+                st.error(f"Initialization error: {str(e)}")
+                if available:
+                    st.info(f"Available embedding models for your API key: {available}")
+                else:
+                    st.warning("No embedding models found with 'embedContent' support for this API key.")
+            except Exception as list_err:
+                st.error(f"Initialization error: {str(e)}\n\nDiagnostic error listing models: {str(list_err)}")
+        else:
             st.error(f"Initialization error: {str(e)}")
-            if available:
-                st.info(f"Available embedding models for your API key: {available}")
-            else:
-                st.warning("No embedding models found with 'embedContent' support for this API key.")
-        except Exception as list_err:
-            st.error(f"Initialization error: {str(e)}\n\nDiagnostic error listing models: {str(list_err)}")
         return None, None, None
 
 def add_documents_to_qdrant(url, db):
@@ -168,14 +193,31 @@ def add_uploaded_file_to_qdrant(uploaded_file, db):
 def main():
     set_sidebar()
 
-    # Check if API keys are set
-    if not all([st.session_state.qdrant_host, 
-                st.session_state.qdrant_api_key, 
-                st.session_state.gemini_api_key]):
-        st.info("👋 Welcome! Please configure your Gemini API Key below to get started.")
-        with st.form("api_config_form"):
-            gemini_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key, placeholder="Starts with AIzaSy...")
+    # Check config
+    provider = st.session_state.provider
+    is_configured = False
+    if provider == "ollama":
+        is_configured = bool(st.session_state.qdrant_host and st.session_state.qdrant_api_key)
+    else:
+        is_configured = bool(st.session_state.qdrant_host and st.session_state.qdrant_api_key and st.session_state.gemini_api_key)
+
+    if not is_configured:
+        st.info("👋 Welcome! Please configure your LLM settings below to get started.")
+        provider_selection = st.selectbox(
+            "Select LLM Provider:", 
+            ["ollama", "gemini"], 
+            index=0 if provider == "ollama" else 1,
+            key="main_config_provider"
+        )
+        if provider_selection != provider:
+            st.session_state.provider = provider_selection
+            st.rerun()
             
+        with st.form("api_config_form"):
+            gemini_key = ""
+            if provider_selection == "gemini":
+                gemini_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key, placeholder="Starts with AIzaSy...")
+                
             st.markdown("**Qdrant Settings (Advanced)**")
             col1, col2 = st.columns(2)
             with col1:
@@ -185,14 +227,16 @@ def main():
                 
             submitted = st.form_submit_button("Start Application", use_container_width=True)
             if submitted:
-                if gemini_key:
-                    st.session_state.gemini_api_key = gemini_key
+                if provider_selection == "gemini" and not gemini_key:
+                    st.error("Please enter a Gemini API Key to proceed.")
+                else:
+                    st.session_state.provider = provider_selection
                     st.session_state.qdrant_host = q_host
                     st.session_state.qdrant_api_key = q_key
+                    if provider_selection == "gemini":
+                        st.session_state.gemini_api_key = gemini_key
                     st.success("Configuration saved! Initializing application...")
                     st.rerun()
-                else:
-                    st.error("Please enter a Gemini API Key to proceed.")
         return
 
     # Initialize components
@@ -236,7 +280,7 @@ def main():
                 st.warning("Please choose a file to upload first.")
 
     st.markdown("---")
-    st.markdown("### 💬 Chat with your Knowledge Base")
+    st.markdown(f"### 💬 Chat with your Knowledge Base ({provider.capitalize()})")
 
     # Render conversational chat history
     for message in st.session_state.messages:
