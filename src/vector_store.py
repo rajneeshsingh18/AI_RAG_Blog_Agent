@@ -7,9 +7,19 @@ def initialize_qdrant_client(host: str, api_key: str):
     """Initializes the Qdrant Client."""
     return QdrantClient(host, api_key=api_key)
 
-def ensure_collection_exists(client: QdrantClient, collection_name: str, vector_size: int = 768):
-    """Checks if the collection exists, and if not, creates it."""
-    if not client.collection_exists(collection_name=collection_name):
+def ensure_collection_exists(client: QdrantClient, collection_name: str, vector_size: int = 3072):
+    """Checks if the collection exists with the correct vector size. Recreates if mismatched."""
+    if client.collection_exists(collection_name=collection_name):
+        # Check if existing collection has the correct vector size
+        info = client.get_collection(collection_name=collection_name)
+        existing_size = info.config.params.vectors.size
+        if existing_size != vector_size:
+            client.delete_collection(collection_name=collection_name)
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
+            )
+    else:
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
