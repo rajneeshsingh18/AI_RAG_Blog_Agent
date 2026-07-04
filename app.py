@@ -12,6 +12,12 @@ from src.retriever import create_rag_retriever_tool
 from langchain_core.messages import HumanMessage
 from src.graph import get_graph, generate_message
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 import streamlit as st
 
 # Configure the Streamlit app
@@ -67,11 +73,11 @@ st.caption("Load URLs or upload files to start a conversational search using Lan
 
 # Initialize session state variables if they don't exist
 if 'qdrant_host' not in st.session_state:
-    st.session_state.qdrant_host = ""
+    st.session_state.qdrant_host = os.getenv("QDRANT_HOST", ":memory:")
 if 'qdrant_api_key' not in st.session_state:
-    st.session_state.qdrant_api_key = ""
+    st.session_state.qdrant_api_key = os.getenv("QDRANT_API_KEY", "dummy")
 if 'gemini_api_key' not in st.session_state:
-    st.session_state.gemini_api_key = ""
+    st.session_state.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
@@ -127,10 +133,9 @@ def initialize_components():
     except Exception as e:
         # Try listing models to diagnose
         try:
-            # pyrefly: ignore [missing-import]
-            import google.generativeai as genai
-            genai.configure(api_key=st.session_state.gemini_api_key)
-            available = [m.name for m in genai.list_models() if 'embedContent' in m.supported_generation_methods]
+            from google import genai
+            client = genai.Client(api_key=st.session_state.gemini_api_key)
+            available = [m.name for m in client.models.list() if 'embedContent' in getattr(m, 'supported_actions', [])]
             st.error(f"Initialization error: {str(e)}")
             if available:
                 st.info(f"Available embedding models for your API key: {available}")
@@ -167,7 +172,27 @@ def main():
     if not all([st.session_state.qdrant_host, 
                 st.session_state.qdrant_api_key, 
                 st.session_state.gemini_api_key]):
-        st.warning("Please configure your API keys in the sidebar first to index content and query the chatbot.")
+        st.info("👋 Welcome! Please configure your Gemini API Key below to get started.")
+        with st.form("api_config_form"):
+            gemini_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key, placeholder="Starts with AIzaSy...")
+            
+            st.markdown("**Qdrant Settings (Advanced)**")
+            col1, col2 = st.columns(2)
+            with col1:
+                q_host = st.text_input("Qdrant Host URL:", value=st.session_state.qdrant_host or ":memory:")
+            with col2:
+                q_key = st.text_input("Qdrant API Key:", type="password", value=st.session_state.qdrant_api_key or "dummy")
+                
+            submitted = st.form_submit_button("Start Application", use_container_width=True)
+            if submitted:
+                if gemini_key:
+                    st.session_state.gemini_api_key = gemini_key
+                    st.session_state.qdrant_host = q_host
+                    st.session_state.qdrant_api_key = q_key
+                    st.success("Configuration saved! Initializing application...")
+                    st.rerun()
+                else:
+                    st.error("Please enter a Gemini API Key to proceed.")
         return
 
     # Initialize components
