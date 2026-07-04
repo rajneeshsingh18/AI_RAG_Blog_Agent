@@ -111,6 +111,10 @@ def set_sidebar():
                 st.session_state.qdrant_api_key = qdrant_api_key
                 if provider == "gemini":
                     st.session_state.gemini_api_key = gemini_api_key
+                # Clear component cache to force re-initialization
+                for key in ['embedding_model', 'client', 'db', 'initialized_provider']:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 st.success("API keys saved successfully!")
                 st.rerun()
             else:
@@ -123,7 +127,7 @@ def set_sidebar():
             st.rerun()
 
 def initialize_components():
-    """Initialize components that require API keys"""
+    """Initialize components that require API keys and cache them in session state."""
     provider = st.session_state.provider
     if provider == "ollama":
         if not all([st.session_state.qdrant_host, st.session_state.qdrant_api_key]):
@@ -133,6 +137,13 @@ def initialize_components():
                    st.session_state.qdrant_api_key, 
                    st.session_state.gemini_api_key]):
             return None, None, None
+
+    # Check if already initialized in session state to preserve local in-memory Qdrant
+    if ('embedding_model' in st.session_state and 
+        'client' in st.session_state and 
+        'db' in st.session_state and 
+        st.session_state.get('initialized_provider') == provider):
+        return st.session_state.embedding_model, st.session_state.client, st.session_state.db
 
     try:
         embedding_model = get_embedding_model(st.session_state.gemini_api_key)
@@ -149,6 +160,12 @@ def initialize_components():
 
         # Initialize vector store
         db = get_vector_store(client, collection_name="qdrant_db", embedding_model=embedding_model)
+
+        # Cache in session state
+        st.session_state.embedding_model = embedding_model
+        st.session_state.client = client
+        st.session_state.db = db
+        st.session_state.initialized_provider = provider
 
         return embedding_model, client, db
         
@@ -172,6 +189,13 @@ def initialize_components():
 
 def add_documents_to_qdrant(url, db):
     try:
+        # Validate URL format to prevent 'idna' codec errors on raw text inputs
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if not parsed.scheme or parsed.scheme not in ("http", "https"):
+            st.error("⚠️ Invalid URL. Please enter a valid web page link starting with http:// or https://. If you want to index local text, use the 'Upload Local File' tab.")
+            return False
+            
         docs = load_web_page(url)
         doc_chunks = chunk_documents(docs)
         add_documents_to_db(db, doc_chunks)
@@ -235,6 +259,12 @@ def main():
                     st.session_state.qdrant_api_key = q_key
                     if provider_selection == "gemini":
                         st.session_state.gemini_api_key = gemini_key
+                    
+                    # Clear component cache to force re-initialization
+                    for key in ['embedding_model', 'client', 'db', 'initialized_provider']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                            
                     st.success("Configuration saved! Initializing application...")
                     st.rerun()
         return
@@ -246,6 +276,15 @@ def main():
 
     # Initialize retriever and tools
     retriever_tool = create_rag_retriever_tool(db)
+
+    # Show points stats metric in the sidebar
+    try:
+        info = client.get_collection(collection_name="qdrant_db")
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📊 Database Metrics")
+        st.sidebar.metric("Total Chunks in DB", info.points_count)
+    except Exception:
+        pass
 
     # Ingestion Selector UI
     st.markdown("### 📥 Document Ingestion")

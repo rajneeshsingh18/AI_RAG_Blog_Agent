@@ -104,6 +104,46 @@ def agent(state, tools):
     model = model.bind_tools(tools)
     response = model.invoke(messages)
     
+    # Robust parsing for local Ollama tool calling
+    if provider == "ollama" and response.content and not response.tool_calls:
+        import json
+        import uuid
+        content = response.content.strip()
+        
+        # Sometimes models wrap JSON in markdown block: ```json ... ```
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if len(lines) >= 3:
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+        
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                tool_calls_list = parsed
+            elif isinstance(parsed, dict):
+                tool_calls_list = [parsed]
+            else:
+                tool_calls_list = []
+                
+            tool_calls = []
+            for tc in tool_calls_list:
+                if isinstance(tc, dict) and "name" in tc:
+                    args = tc.get("args") or tc.get("arguments") or {}
+                    tool_calls.append({
+                        "name": tc["name"],
+                        "args": args,
+                        "id": f"call_{uuid.uuid4().hex[:12]}"
+                    })
+            if tool_calls:
+                response.tool_calls = tool_calls
+                response.content = ""
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
     # We return a list, because this will get added to the existing list
     return {"messages": [response]}
 
@@ -239,7 +279,15 @@ def generate_message(graph, inputs):
 
     for output in graph.stream(inputs):
         for key, value in output.items():
-            if key == "generate" and isinstance(value, dict):
-                generated_message = value.get("messages", [""])[0]
+            if key in ["generate", "agent"] and isinstance(value, dict):
+                msgs = value.get("messages", [])
+                if msgs:
+                    msg = msgs[0]
+                    # Extract string content whether it's an AIMessage object or a raw string
+                    content = msg.content if hasattr(msg, "content") else str(msg)
+                    
+                    # Update message if it has text (ignores empty tool-call-only messages)
+                    if content:
+                        generated_message = content
     
     return generated_message

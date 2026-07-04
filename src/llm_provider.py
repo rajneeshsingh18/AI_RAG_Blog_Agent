@@ -7,7 +7,7 @@ def get_chat_model(provider: str, api_key: str = None, model_name: str = None):
     """
     if provider == "ollama":
         # Local Ollama model
-        selected_model = model_name or "llama3.2"
+        selected_model = model_name or "qwen2.5-coder:7b"
         return ChatOllama(
             model=selected_model,
             temperature=0
