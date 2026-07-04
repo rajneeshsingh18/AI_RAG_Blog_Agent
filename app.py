@@ -5,7 +5,7 @@ from src.vector_store import (
     get_vector_store,
     add_documents_to_db
 )
-from src.ingestion import load_web_page
+from src.ingestion import load_web_page, load_uploaded_file
 from src.chunking import chunk_documents
 from src.retriever import create_rag_retriever_tool
 
@@ -95,6 +95,16 @@ def add_documents_to_qdrant(url, db):
         st.error(f"Error adding documents: {str(e)}")
         return False
 
+def add_uploaded_file_to_qdrant(uploaded_file, db):
+    try:
+        docs = load_uploaded_file(uploaded_file)
+        doc_chunks = chunk_documents(docs)
+        add_documents_to_db(db, doc_chunks)
+        return True
+    except Exception as e:
+        st.error(f"Error processing uploaded file: {str(e)}")
+        return False
+
 def main():
     set_sidebar()
 
@@ -114,20 +124,35 @@ def main():
     retriever_tool = create_rag_retriever_tool(db)
     tools = [retriever_tool]
 
-    # URL input section
-    url = st.text_input(
-        ":link: Paste the blog link:",
-        placeholder="e.g., https://lilianweng.github.io/posts/2023-06-23-agent/"
-    )
-    if st.button("Enter URL"):
-        if url:
-            with st.spinner("Processing documents..."):
-                if add_documents_to_qdrant(url, db):
-                    st.success("Documents added successfully!")
-                else:
-                    st.error("Failed to add documents")
-        else:
-            st.warning("Please enter a URL")
+    # Ingestion Selection
+    tab1, tab2 = st.tabs([":link: Query Blog URL", ":file_folder: Upload Local File (PDF/TXT)"])
+
+    with tab1:
+        url = st.text_input(
+            "Paste the blog link:",
+            placeholder="e.g., https://lilianweng.github.io/posts/2023-06-23-agent/"
+        )
+        if st.button("Enter URL"):
+            if url:
+                with st.spinner("Processing documents..."):
+                    if add_documents_to_qdrant(url, db):
+                        st.success("Documents added successfully!")
+                    else:
+                        st.error("Failed to add documents")
+            else:
+                st.warning("Please enter a URL")
+
+    with tab2:
+        uploaded_file = st.file_uploader("Choose a PDF or TXT file:", type=["pdf", "txt"])
+        if st.button("Enter File"):
+            if uploaded_file:
+                with st.spinner("Processing uploaded file..."):
+                    if add_uploaded_file_to_qdrant(uploaded_file, db):
+                        st.success(f"File '{uploaded_file.name}' processed successfully!")
+                    else:
+                        st.error("Failed to process file")
+            else:
+                st.warning("Please upload a file first")
 
     # Query section
     graph = get_graph(retriever_tool)
