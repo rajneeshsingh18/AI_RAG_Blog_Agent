@@ -7,7 +7,7 @@ from src.vector_store import (
 )
 from src.ingestion import load_web_page
 from src.chunking import chunk_documents
-from langchain_core.tools.retriever import create_retriever_tool
+from src.retriever import create_rag_retriever_tool
 
 from typing import Annotated, Literal, Sequence
 from typing_extensions import TypedDict
@@ -329,12 +329,7 @@ def main():
         return
 
     # Initialize retriever and tools
-    retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-    retriever_tool = create_retriever_tool(
-        retriever,
-        "retrieve_blog_posts",
-        "Search and return information about blog posts on LLMs, LLM agents, prompt engineering, and adversarial attacks on LLMs.",
-    )
+    retriever_tool = create_rag_retriever_tool(db)
     tools = [retriever_tool]
 
     # URL input section
