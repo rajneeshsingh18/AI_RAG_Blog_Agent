@@ -14,8 +14,56 @@ from src.graph import get_graph, generate_message
 
 import streamlit as st
 
-st.set_page_config(page_title="AI Blog Search", page_icon=":mag_right:")
-st.header(":blue[Agentic RAG with LangGraph:] :green[AI Blog Search]")
+# Configure the Streamlit app
+st.set_page_config(page_title="AI Blog Search - Agentic RAG", page_icon=":mag_right:", layout="centered")
+
+# Inject premium CSS styling
+st.markdown("""
+<style>
+/* Import Outfit font */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+html, body, [data-testid="stAppViewContainer"] {
+    font-family: 'Outfit', sans-serif;
+}
+
+/* Custom titles and headers */
+h1, h2, h3 {
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+}
+
+/* Styling sidebar cards */
+section[data-testid="stSidebar"] {
+    border-right: 1px solid #e2e8f0;
+}
+
+/* Styling tabs in Streamlit */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 12px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px 8px 0px 0px;
+    padding: 8px 16px;
+    font-weight: 500;
+}
+
+/* Custom premium button design */
+div.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+div.stButton > button:hover {
+    transform: translateY(-1px);
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.header("⚡ :blue[Agentic RAG] :grey[AI Blog & Document Search]")
+st.caption("Load URLs or upload files to start a conversational search using LangGraph agents.")
 
 # Initialize session state variables if they don't exist
 if 'qdrant_host' not in st.session_state:
@@ -24,24 +72,33 @@ if 'qdrant_api_key' not in st.session_state:
     st.session_state.qdrant_api_key = ""
 if 'gemini_api_key' not in st.session_state:
     st.session_state.gemini_api_key = ""
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
 def set_sidebar():
     """Setup sidebar for API keys and configuration."""
     with st.sidebar:
-        st.subheader("API Configuration")
+        st.subheader("⚙️ API Configuration")
         
-        qdrant_host = st.text_input("Enter your Qdrant Host URL:", type="password")
-        qdrant_api_key = st.text_input("Enter your Qdrant API key:", type="password")
-        gemini_api_key = st.text_input("Enter your Gemini API key:", type="password")
+        qdrant_host = st.text_input("Qdrant Host URL:", type="password", value=st.session_state.qdrant_host)
+        qdrant_api_key = st.text_input("Qdrant API Key:", type="password", value=st.session_state.qdrant_api_key)
+        gemini_api_key = st.text_input("Gemini API Key:", type="password", value=st.session_state.gemini_api_key)
 
-        if st.button("Done"):
+        if st.button("Save Configuration", use_container_width=True):
             if qdrant_host and qdrant_api_key and gemini_api_key:
                 st.session_state.qdrant_host = qdrant_host
                 st.session_state.qdrant_api_key = qdrant_api_key
                 st.session_state.gemini_api_key = gemini_api_key
-                st.success("API keys saved!")
+                st.success("API keys saved successfully!")
+                st.rerun()
             else:
-                st.warning("Please fill all API fields")
+                st.warning("Please fill all configuration fields.")
+        
+        st.markdown("---")
+        if st.button("🗑️ Clear Chat History", use_container_width=True):
+            st.session_state.messages = []
+            st.success("Chat history cleared!")
+            st.rerun()
 
 def initialize_components():
     """Initialize components that require API keys"""
@@ -83,8 +140,6 @@ def initialize_components():
             st.error(f"Initialization error: {str(e)}\n\nDiagnostic error listing models: {str(list_err)}")
         return None, None, None
 
-
-
 def add_documents_to_qdrant(url, db):
     try:
         docs = load_web_page(url)
@@ -112,7 +167,7 @@ def main():
     if not all([st.session_state.qdrant_host, 
                 st.session_state.qdrant_api_key, 
                 st.session_state.gemini_api_key]):
-        st.warning("Please configure your API keys in the sidebar first")
+        st.warning("Please configure your API keys in the sidebar first to index content and query the chatbot.")
         return
 
     # Initialize components
@@ -122,60 +177,68 @@ def main():
 
     # Initialize retriever and tools
     retriever_tool = create_rag_retriever_tool(db)
-    tools = [retriever_tool]
 
-    # Ingestion Selection
+    # Ingestion Selector UI
+    st.markdown("### 📥 Document Ingestion")
     tab1, tab2 = st.tabs([":link: Query Blog URL", ":file_folder: Upload Local File (PDF/TXT)"])
 
     with tab1:
         url = st.text_input(
-            "Paste the blog link:",
-            placeholder="e.g., https://lilianweng.github.io/posts/2023-06-23-agent/"
+            "Enter web page link:",
+            placeholder="e.g., https://lilianweng.github.io/posts/2023-06-23-agent/",
+            key="url_input"
         )
-        if st.button("Enter URL"):
+        if st.button("Index Web Page", use_container_width=True):
             if url:
-                with st.spinner("Processing documents..."):
+                with st.spinner("Scraping and indexing web page..."):
                     if add_documents_to_qdrant(url, db):
-                        st.success("Documents added successfully!")
+                        st.success("Web page indexed and saved to database successfully!")
                     else:
-                        st.error("Failed to add documents")
+                        st.error("Failed to index web page.")
             else:
-                st.warning("Please enter a URL")
+                st.warning("Please enter a URL first.")
 
     with tab2:
-        uploaded_file = st.file_uploader("Choose a PDF or TXT file:", type=["pdf", "txt"])
-        if st.button("Enter File"):
+        uploaded_file = st.file_uploader("Upload a file:", type=["pdf", "txt"], key="file_upload")
+        if st.button("Index Local File", use_container_width=True):
             if uploaded_file:
-                with st.spinner("Processing uploaded file..."):
+                with st.spinner(f"Parsing and indexing '{uploaded_file.name}'..."):
                     if add_uploaded_file_to_qdrant(uploaded_file, db):
-                        st.success(f"File '{uploaded_file.name}' processed successfully!")
+                        st.success(f"File '{uploaded_file.name}' indexed and saved to database successfully!")
                     else:
-                        st.error("Failed to process file")
+                        st.error("Failed to process local file.")
             else:
-                st.warning("Please upload a file first")
-
-    # Query section
-    graph = get_graph(retriever_tool)
-    query = st.text_area(
-        ":bulb: Enter your query about the blog post:",
-        placeholder="e.g., What does Lilian Weng say about the types of agent memory?"
-    )
-
-    if st.button("Submit Query"):
-        if not query:
-            st.warning("Please enter a query")
-            return
-
-        inputs = {"messages": [HumanMessage(content=query)]}
-        with st.spinner("Generating response..."):
-            try:
-                response = generate_message(graph, inputs)
-                st.write(response)
-            except Exception as e:
-                st.error(f"Error generating response: {str(e)}")
+                st.warning("Please choose a file to upload first.")
 
     st.markdown("---")
-    st.write("Built with :blue-background[LangChain] | :blue-background[LangGraph] by [Charan](https://www.linkedin.com/in/codewithcharan/)")
+    st.markdown("### 💬 Chat with your Knowledge Base")
+
+    # Render conversational chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Load agent graph
+    graph = get_graph(retriever_tool)
+
+    # Conversational chat input
+    if prompt := st.chat_input("Ask a question about the indexed content..."):
+        # Display user message in chat container
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        # Store user message in history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        # Generate agent reply
+        inputs = {"messages": [HumanMessage(content=prompt)]}
+        with st.chat_message("assistant"):
+            with st.spinner("Consulting agent workflow..."):
+                try:
+                    response = generate_message(graph, inputs)
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                except Exception as e:
+                    st.error(f"Error generating response: {str(e)}")
 
 if __name__ == "__main__":
     main()
