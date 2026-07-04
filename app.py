@@ -3,7 +3,7 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from uuid import uuid4
 from src.ingestion import load_web_page
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from src.chunking import chunk_documents
 from langchain_core.tools.retriever import create_retriever_tool
 
 from typing import Annotated, Literal, Sequence
@@ -315,10 +315,7 @@ def generate_message(graph, inputs):
 def add_documents_to_qdrant(url, db):
     try:
         docs = load_web_page(url)
-        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            chunk_size=100, chunk_overlap=50
-        )
-        doc_chunks = text_splitter.split_documents(docs)
+        doc_chunks = chunk_documents(docs)
         uuids = [str(uuid4()) for _ in range(len(doc_chunks))]
         db.add_documents(documents=doc_chunks, ids=uuids)
         return True
