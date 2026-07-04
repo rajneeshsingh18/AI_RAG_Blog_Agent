@@ -1,6 +1,6 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-def chunk_documents(docs, chunk_size: int = 100, chunk_overlap: int = 50):
+def chunk_documents(docs, chunk_size: int = 1000, chunk_overlap: int = 200):
     """Splits loaded LangChain Documents into smaller, overlapping chunks."""
     text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
         chunk_size=chunk_size, chunk_overlap=chunk_overlap

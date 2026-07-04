@@ -1,4 +1,4 @@
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from src.embeddings import get_embedding_model
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from uuid import uuid4
@@ -61,11 +61,7 @@ def initialize_components():
         return None, None, None
 
     try:
-        # Initialize embedding model with API key
-        embedding_model = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=st.session_state.gemini_api_key
-        )
+        embedding_model = get_embedding_model(st.session_state.gemini_api_key)
 
         # Initialize Qdrant client
         client = QdrantClient(
