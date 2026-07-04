@@ -1,7 +1,10 @@
 from src.embeddings import get_embedding_model
-from langchain_qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
-from uuid import uuid4
+from src.vector_store import (
+    initialize_qdrant_client,
+    ensure_collection_exists,
+    get_vector_store,
+    add_documents_to_db
+)
 from src.ingestion import load_web_page
 from src.chunking import chunk_documents
 from langchain_core.tools.retriever import create_retriever_tool
@@ -64,31 +67,23 @@ def initialize_components():
         embedding_model = get_embedding_model(st.session_state.gemini_api_key)
 
         # Initialize Qdrant client
-        client = QdrantClient(
+        client = initialize_qdrant_client(
             st.session_state.qdrant_host,
             api_key=st.session_state.qdrant_api_key
         )
 
         # Ensure collection exists
-        if not client.collection_exists(collection_name="qdrant_db"):
-            from qdrant_client.http.models import Distance, VectorParams
-            client.create_collection(
-                collection_name="qdrant_db",
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE)
-            )
+        ensure_collection_exists(client, collection_name="qdrant_db")
 
         # Initialize vector store
-        db = QdrantVectorStore(
-            client=client,
-            collection_name="qdrant_db",
-            embedding=embedding_model
-        )
+        db = get_vector_store(client, collection_name="qdrant_db", embedding_model=embedding_model)
 
         return embedding_model, client, db
         
     except Exception as e:
         # Try listing models to diagnose
         try:
+            # pyrefly: ignore [missing-import]
             import google.generativeai as genai
             genai.configure(api_key=st.session_state.gemini_api_key)
             available = [m.name for m in genai.list_models() if 'embedContent' in m.supported_generation_methods]
@@ -312,8 +307,7 @@ def add_documents_to_qdrant(url, db):
     try:
         docs = load_web_page(url)
         doc_chunks = chunk_documents(docs)
-        uuids = [str(uuid4()) for _ in range(len(doc_chunks))]
-        db.add_documents(documents=doc_chunks, ids=uuids)
+        add_documents_to_db(db, doc_chunks)
         return True
     except Exception as e:
         st.error(f"Error adding documents: {str(e)}")
